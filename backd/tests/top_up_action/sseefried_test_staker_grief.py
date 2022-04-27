@@ -1,6 +1,6 @@
 import pytest
 import brownie
-from brownie import AliceAttacker, BobAttacker
+from brownie import AliceAttacker
 from brownie.test.managers.runner import RevertContextManager as reverts
 from support.constants import ADMIN_DELAY, AddressProviderKeys
 from support.contract_utils import update_topup_handler
@@ -19,7 +19,6 @@ pytestmark = pytest.mark.usefixtures(
     "approveAlice",
     "curveInitialLiquidity",
 )
-
 
 @pytest.fixture
 def registerSetUp(chain, topUpAction, address_provider, admin, pool, mockTopUpHandler):
@@ -75,7 +74,14 @@ def _create_position(on_behalf_of, threshold, coin, payer, topUpAction, pool, lp
     )
     return record
 
-def test_topup(admin, chain, alice, bob, topUpAction, coin, lpToken, pool, gas_bank, initialAmount):
+#
+# Demonstrates that Stakers can grief Keepers running `TopUpAction.execute`
+#
+# The test succeeds by checking that `topUpAction.execute` reverts
+#
+# Alice is the Staker
+# Bob is the Keeper
+def test_topup_staker_griefing(admin, chain, alice, bob, topUpAction, coin, lpToken, pool, gas_bank, initialAmount):
     aliceAttacker = admin.deploy(AliceAttacker, amount = 1e18);
     coin.mint_for_testing(aliceAttacker, initialAmount, {"from": admin})
     coin.approve(pool, 2**256 - 1, {"from": aliceAttacker})
@@ -85,11 +91,11 @@ def test_topup(admin, chain, alice, bob, topUpAction, coin, lpToken, pool, gas_b
 
     record = _create_position(alice, "1.5", coin, aliceAttacker, topUpAction, pool, lpToken)
 
-    # aliceAttacker.setCanReceive(False)
+    aliceAttacker.setCanReceive(False) # will revert on receive() after this call
 
     bob_balance_before = bob.balance()
 
-    with brownie.reverts("Alice griefed"):
+    with brownie.reverts("transfer failed"):
         topUpAction.execute(
             aliceAttacker,
             encode_account(alice),
@@ -98,58 +104,10 @@ def test_topup(admin, chain, alice, bob, topUpAction, coin, lpToken, pool, gas_b
             {"from": bob, "priority_fee": record.priorityFee},
         ) # will revert
 
-    print(tx.info())
-
     bob_balance_after = bob.balance()
-    print("bob before", bob_balance_before)
-    print("bob after", bob_balance_after)
-    assert 1 == 2
 
-#     previous_gas_balance = gas_bank.balanceOf(alice)
-#     print("bob before", bobAttacker.balance())
+    # Show that Keeper Bob loses gas
+    assert bob_balance_after < bob_balance_before
 
 
 
-#     tx = bobAttacker.attack();
-
-#     # tx = topUpAction.execute(
-#     #     alice,
-#     #     encode_account(alice),
-#     #     bobAttacker,
-#     #     MOCK_PROTOCOL_NAME,
-#     #     {"from": bob, "priority_fee": record.priorityFee},
-#     # )
-
-#     print("bob after ", bobAttacker.balance())
-#     print(tx.info())
-# #    assert tx.gas_price == chain.base_fee + record.priorityFee
-
-#     new_gas_balance = gas_bank.balanceOf(alice)
-
-# #    assert new_gas_balance < previous_gas_balance
-
-#     gas_bank_withdraw_event = tx.events["Withdraw"][0]
-#     assert gas_bank_withdraw_event["account"] == alice
-# #    assert gas_bank_withdraw_event["value"] == previous_gas_balance - new_gas_balance
-
-#     gas_consumed = gas_bank_withdraw_event["value"] // tx.gas_price
-#     print(tx.events["Log"])
-#     print("record.priorityFee", record.priorityFee)
-#     print("gas_bank_withdraw_event[\"value\"]",  gas_bank_withdraw_event["value"])
-#     print("gas_consumed", gas_consumed)
-#     print("tx.gas_price", tx.gas_price)
-#     print("tx.gas_used", tx.gas_used)
-
-#     # FIXME: this should succeed but for some reason does not
-#     # assert gas_consumed < tx.gas_used
-
-#     execute_event = tx.events["TopUp"][0]
-#     assert execute_event["topupAmount"] == single_topup_amount
-#     amount_with_fees = single_topup_amount * (scale(1) + TOPUP_FEE) / scale(1)
-#     assert execute_event["consumedDepositAmount"] == amount_with_fees
-#     new_user_factor = topUpAction.getHealthFactor(
-#         MOCK_PROTOCOL_NAME, encode_account(alice), b""
-#     )
-#     # mock version starts at 1.3 and has +0.3 if topup is succesful
-#     assert new_user_factor == scale("1.6")
-#     assert 1 == 2
